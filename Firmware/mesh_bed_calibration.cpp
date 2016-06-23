@@ -35,6 +35,12 @@ static inline void update_current_position_xyz()
       plan_set_position(current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS], current_position[E_AXIS]);
 }
 
+static inline void update_current_position_z()
+{
+      current_position[Z_AXIS] = st_get_position_mm(Z_AXIS);
+      plan_set_z_position(current_position[Z_AXIS]);
+}
+
 // At the current position, find the Z stop.
 inline void find_bed_induction_sensor_point_z() 
 {
@@ -45,7 +51,7 @@ inline void find_bed_induction_sensor_point_z()
     current_position[Z_AXIS] = -10;
     go_to_current(homing_feedrate[Z_AXIS]/60);
     // we have to let the planner know where we are right now as it is not where we said to go.
-    update_current_position_xyz();
+    update_current_position_z();
 
     // move up the retract distance
     current_position[Z_AXIS] += home_retract_mm_ext(Z_AXIS);
@@ -55,7 +61,7 @@ inline void find_bed_induction_sensor_point_z()
     current_position[Z_AXIS] -= home_retract_mm_ext(Z_AXIS) * 2;
     go_to_current(homing_feedrate[Z_AXIS]/(4*60));
     // we have to let the planner know where we are right now as it is not where we said to go.
-    update_current_position_xyz();
+    update_current_position_z();
 
     enable_endstops(endstops_enabled);
     enable_z_endstop(endstop_z_enabled);
@@ -360,16 +366,20 @@ inline bool improve_bed_induction_sensor_point2(bool lift_z_on_min_y)
         enable_z_endstop(true);
         go_xy(x1, current_position[Y_AXIS], homing_feedrate[X_AXIS] / 60.f);
         update_current_position_xyz();
-        if (! endstop_z_hit_on_purpose())
-            return false;
+        if (! endstop_z_hit_on_purpose()) {
+            current_position[X_AXIS] = center_old_x;
+            goto canceled;
+        }
         a = current_position[X_AXIS];
         enable_z_endstop(false);
         go_xy(x1, current_position[Y_AXIS], homing_feedrate[X_AXIS] / 60.f);
         enable_z_endstop(true);
         go_xy(x0, current_position[Y_AXIS], homing_feedrate[X_AXIS] / 60.f);
         update_current_position_xyz();
-        if (! endstop_z_hit_on_purpose())
-            return false;
+        if (! endstop_z_hit_on_purpose()) {
+            current_position[X_AXIS] = center_old_x;
+            goto canceled;
+        }
         b = current_position[X_AXIS];
 
         // Go to the center.
@@ -392,20 +402,23 @@ inline bool improve_bed_induction_sensor_point2(bool lift_z_on_min_y)
         if (lift_z_on_min_y) {
             // The first row of points are very close to the end stop.
             // Lift the sensor to disengage the trigger. This is necessary because of the sensor hysteresis.
-            go_xyz(current_position[X_AXIS], y0, current_position[Z_AXIS]+5.f, homing_feedrate[Z_AXIS] / 60.f);
+            go_xyz(current_position[X_AXIS], y0, current_position[Z_AXIS]+1.5f, homing_feedrate[Z_AXIS] / 60.f);
             // and go back.
             go_xyz(current_position[X_AXIS], y0, current_position[Z_AXIS], homing_feedrate[Z_AXIS] / 60.f);
         }
         if (lift_z_on_min_y && (READ(Z_MIN_PIN) ^ Z_MIN_ENDSTOP_INVERTING) == 1) {
             // Already triggering before we started the move.
             // Shift the trigger point slightly outwards.
-            a = current_position[Y_AXIS] - 1.5f;
+//            a = current_position[Y_AXIS] - 1.5f;
+            a = current_position[Y_AXIS];
         } else {
             enable_z_endstop(true);
             go_xy(current_position[X_AXIS], y1, homing_feedrate[X_AXIS] / 60.f);
             update_current_position_xyz();
-            if (! endstop_z_hit_on_purpose())
-                return false;
+            if (! endstop_z_hit_on_purpose()) {
+                current_position[Y_AXIS] = center_old_y;
+                goto canceled;
+            }
             a = current_position[Y_AXIS];
         }
         enable_z_endstop(false);
@@ -413,8 +426,10 @@ inline bool improve_bed_induction_sensor_point2(bool lift_z_on_min_y)
         enable_z_endstop(true);
         go_xy(current_position[X_AXIS], y0, homing_feedrate[X_AXIS] / 60.f);
         update_current_position_xyz();
-        if (! endstop_z_hit_on_purpose())
-            return false;
+        if (! endstop_z_hit_on_purpose()) {
+            current_position[Y_AXIS] = center_old_y;
+            goto canceled;
+        }
         b = current_position[Y_AXIS];
 
         // Go to the center.
@@ -424,6 +439,12 @@ inline bool improve_bed_induction_sensor_point2(bool lift_z_on_min_y)
     }
 
     return true;
+
+canceled:
+    // Go back to the center.
+    enable_z_endstop(false);
+    go_xy(current_position[X_AXIS], current_position[Y_AXIS], homing_feedrate[X_AXIS] / 60.f);
+    return false;
 }
 
 #define MESH_BED_CALIBRATION_SHOW_LCD
@@ -587,32 +608,33 @@ bool improve_bed_offset_and_skew(int8_t method)
 //        delay_keep_alive(3000);
         // Improve the point position by searching its center in a current plane.
         int8_t n_errors = 3;
-        for (int8_t iter = 0; iter < 4; ++ iter) {
+        for (int8_t iter = 0; iter < 4;) {
             bool found = false;
             switch (method) {
                 case 0: found = improve_bed_induction_sensor_point(); break;
                 case 1: found = improve_bed_induction_sensor_point2(iy == 0); break;
                 default: break;
             }
-            if (! found) {
-                if (n_errors -- == 0) {
-                    // Give up.
-                    goto canceled;
-                } else {
-                    // Try to move the Z axis down a bit to increase a chance of the sensor to trigger.
-                    current_position[Z_AXIS] -= 0.025f;
-                    enable_endstops(false);
-                    enable_z_endstop(false);
-                    go_to_current(homing_feedrate[Z_AXIS]);
+            if (found) {
+                if (++ iter == 4) {
+                    float *pt = pts + 2 * (ix + iy * 3);
+                    pt[0] = current_position[X_AXIS];
+                    pt[1] = current_position[Y_AXIS];
+                    cntr[0] += pt[0];
+                    cntr[1] += pt[1];
                 }
+            } else if (n_errors -- == 0) {
+                // Give up.
+                goto canceled;
+            } else {
+                // Try to move the Z axis down a bit to increase a chance of the sensor to trigger.
+                current_position[Z_AXIS] -= 0.025f;
+                enable_endstops(false);
+                enable_z_endstop(false);
+                go_to_current(homing_feedrate[Z_AXIS]);
             }
         }
 //        delay_keep_alive(3000);
-        float *pt = pts + 2 * (ix + iy * 3);
-        pt[0] = current_position[X_AXIS];
-        pt[1] = current_position[Y_AXIS];
-        cntr[0] += pt[0];
-        cntr[1] += pt[1];
     }
 
     // Average the X and Y vectors. They may not be perpendicular, if the printer is built incorrectly.
@@ -673,91 +695,3 @@ void reset_bed_offset_and_skew()
     eeprom_update_dword((uint32_t*)(EEPROM_BED_CALIBRATION_VEC_Y +0), 0x0FFFFFFFF);
     eeprom_update_dword((uint32_t*)(EEPROM_BED_CALIBRATION_VEC_Y +4), 0x0FFFFFFFF);
 }
-
-#if 0
-static const float[9][2] PROGMEM bed_points = {
-};
-
-bool calculate_machine_skew_and_offset_LS(
-    // Matrix of 9 2D points (18 floats)
-    float *pts,
-    // Resulting correction matrix.
-    float *vec_x,
-    float *vec_y,
-    float *cntr,
-    // Temporary values, 49-18-(2*3)=25 floats
-    float *temp
-{
-    {
-        // Create covariance matrix for A, collect the right hand side b.
-        float A[3][3] = { 0.f };
-        float b[3] = { 0.f };
-        float acc;
-        for (uint8_t r = 0; r < 3; ++ r) {
-            for (uint8_t c = 0; c < 3; ++ c) {
-                acc = 0;
-                for (uint8_t i = 0; i < 9; ++ i) {
-                    float a = (r == 2) ? 1.f : pts[2 * i + r];
-                    float b = (c == 2) ? 1.f : pts[2 * i + c];
-                    acc += a * b;
-                }
-                A[r][c] = acc;
-            }
-            acc = 0.f;
-            for (uint8_t i = 0; i < 9; ++ i) {
-                float a = (r == 2) ? 1.f : pts[2 * i + r];
-                float b = pgm_read_float(&coeff2[i][0]);
-                acc += a * b;
-            }
-            b[r] = acc;
-        }
-        // Solve the linear equation for ax, bx, cx.
-        float x[3] = { 0.f };
-        for (uint8_t iter = 0; iter < 100; ++ iter) {
-            x[0] = (b[0] - A[1] * x[1] - A[2] * x[2]) / A[0];
-            x[1] = (b[1] - A[0] * x[0] - A[2] * x[2]) / A[1];
-            x[2] = (b[2] - A[0] * x[0] - A[1] * x[1]) / A[2];
-        }
-        // Store the result to the output variables.
-        vec_x[0] = x[0];
-        vec_y[0] = x[1];
-        cntr[0] = x[2];
-
-        // Recalculate b for the y values.
-        for (uint8_t r = 0; r < 3; ++ r) {
-            acc = 0.f;
-            for (uint8_t i = 0; i < 9; ++ i) {
-                float a = (r == 2) ? 1.f : pts[2 * i + r];
-                float b = pgm_read_float(&coeff2[i][1]);
-                acc += a * b;
-            }
-            b[r] = acc;
-        }
-        // Solve the linear equation for ay, by, cy.
-        x[0] = 0.f, x[1] = 0.f; x[2] = 0.f;
-        for (uint8_t iter = 0; iter < 100; ++ iter) {
-            x[0] = (b[0] - A[1] * x[1] - A[2] * x[2]) / A[0];
-            x[1] = (b[1] - A[0] * x[0] - A[2] * x[2]) / A[1];
-            x[2] = (b[2] - A[0] * x[0] - A[1] * x[1]) / A[2];
-        }
-        // Store the result to the output variables.
-        vec_x[1] = x[0];
-        vec_y[1] = x[1];
-        cntr[1] = x[2];
-    }
-
-    // Normalize the vectors. We expect, that the machine axes may be skewed a bit, but the distances are correct.
-    // l shall be very close to 1 already.
-    float l = sqrt(vec_x[0]*vec_x[0] + vec_x[1] * vec_x[1]);
-    vec_x[0] /= l;
-    vec_x[1] /= l;
-    l = sqrt(vec_y[0]*vec_y[0] + vec_y[1] * vec_y[1]);
-    vec_y[0] /= l;
-    vec_y[1] /= l;
-
-
-
-    // Invert the transformation matrix made of vec_x, vec_y and cntr.
-
-}
-#endif

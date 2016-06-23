@@ -1543,7 +1543,7 @@ void lcd_mesh_calibration()
 
 void lcd_mesh_calibration_reset()
 {
-  enquecommand_P(PSTR("M44"));
+  enquecommand_P(PSTR("M45"));
   lcd_return_to_status();
 }
 

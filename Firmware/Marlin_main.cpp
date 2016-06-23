@@ -2715,42 +2715,16 @@ void process_commands()
       }
      break;
 
-    case 44:
+    case 45:
         reset_bed_offset_and_skew();
         break;
-
-    case 45: // M45: mesh_bed_calibration
-        {
-            // Firstly check if we know where we are
-            if ( !( axis_known_position[X_AXIS] && axis_known_position[Y_AXIS]) ){
-                // We don't know where we are! HOME!
-                enquecommand_P((PSTR("G28 X0 Y0")));
-                enquecommand_P((PSTR("M45")));
-                break;
-            }
-            
-            setup_for_endstop_move();
-            find_bed_offset_and_skew();
-//            improve_bed_offset_and_skew();
-            clean_up_after_endstop_move();
-            current_position[Z_AXIS] = MESH_HOME_Z_SEARCH;
-            plan_buffer_line(current_position[X_AXIS], current_position[Y_AXIS],current_position[Z_AXIS] , current_position[E_AXIS], homing_feedrate[Z_AXIS]/40, active_extruder);
-            /*
-            current_position[X_AXIS] = X_MIN_POS+0.2;
-            current_position[Y_AXIS] = Y_MIN_POS+0.2;
-            current_position[Z_AXIS] = Z_MIN_POS;
-            plan_buffer_line(current_position[X_AXIS], current_position[X_AXIS], current_position[Z_AXIS], current_position[E_AXIS], XY_AXIS_FEEDRATE, active_extruder);
-            */
-            st_synchronize();
-        }
-    break;
 
     case 46: // M46: mesh_bed_calibration with manual Z up
         {
             // Firstly check if we know where we are
             if ( !( axis_known_position[X_AXIS] && axis_known_position[Y_AXIS]) ){
                 // We don't know where we are! HOME!
-                enquecommand_P((PSTR("G28 X0 Y0 W0"))); // W0 tells G28 to not perform mesh bed leveling.
+                enquecommand_P((PSTR("G28 X Y"))); // W0 tells G28 to not perform mesh bed leveling.
                 enquecommand_P((PSTR("M46")));
                 break;
             }
@@ -2776,7 +2750,7 @@ void process_commands()
             // The iprovement.
             
             //enquecommand_P((PSTR("G80")));
-            enquecommand_P((PSTR("G28 X0 Y0 W0")));
+            enquecommand_P((PSTR("G28 X Y")));
             enquecommand_P((PSTR("M47")));
         }
     break;
@@ -2786,7 +2760,7 @@ void process_commands()
           // Firstly check if we know where we are
           if ( !( axis_known_position[X_AXIS] && axis_known_position[Y_AXIS]) ) {
               // We don't know where we are! HOME!
-              enquecommand_P((PSTR("G28 X0 Y0 W0"))); // W0 tells G28 to not perform mesh bed leveling.
+              enquecommand_P((PSTR("G28 X Y"))); // W0 tells G28 to not perform mesh bed leveling.
               enquecommand_P((PSTR("M47")));
               break;
           }
