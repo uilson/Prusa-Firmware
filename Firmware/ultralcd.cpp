@@ -38,6 +38,8 @@ int lcd_commands_type=0;
 int lcd_commands_step=0;
 bool isPrintPaused = false;
 
+bool menuExiting = false;
+
 /* Configuration settings */
 int plaPreheatHotendTemp;
 int plaPreheatHPBTemp;
@@ -1056,26 +1058,24 @@ static void lcd_move_e()
 }
 
 
+// Save a single axis babystep value.
 void EEPROM_save_B(int pos, int* value)
 {
   union Data data;
   data.value = *value;
 
-  eeprom_write_byte((unsigned char*)pos, data.b[0]);
-  eeprom_write_byte((unsigned char*)pos + 1, data.b[1]);
-
-
+  eeprom_update_byte((unsigned char*)pos, data.b[0]);
+  eeprom_update_byte((unsigned char*)pos + 1, data.b[1]);
 }
 
+// Read a single axis babystep value.
 void EEPROM_read_B(int pos, int* value)
 {
   union Data data;
   data.b[0] = eeprom_read_byte((unsigned char*)pos);
   data.b[1] = eeprom_read_byte((unsigned char*)pos + 1);
   *value = data.value;
-
 }
-
 
 
 static void lcd_move_x() {
@@ -1096,15 +1096,17 @@ static void _lcd_babystep(int axis, const char *msg) {
     babystepsTodo[axis] += (int)encoderPosition;
     babystepMem[axis] += (int)encoderPosition;
     babystepMemMM[axis] = babystepMem[axis]/axis_steps_per_unit[Z_AXIS];
-	delay(50);
-	encoderPosition = 0;
+    delay(50);
+    encoderPosition = 0;
     lcdDrawUpdate = 1;
   }
   if (lcdDrawUpdate) lcd_implementation_drawedit_2(msg, ftostr13ns(babystepMemMM[axis]));
+  if (LCD_CLICKED || menuExiting)
+    // Only update the EEPROM when leaving the menu.
+    EEPROM_save_B(
+      (axis == 0) ? EEPROM_BABYSTEP_X : ((axis == 1) ? EEPROM_BABYSTEP_Y : EEPROM_BABYSTEP_Z), 
+      &babystepMem[axis]);
   if (LCD_CLICKED) lcd_goto_menu(lcd_main_menu);
-  EEPROM_save_B(EEPROM_BABYSTEP_X, &babystepMem[0]);
-  EEPROM_save_B(EEPROM_BABYSTEP_Y, &babystepMem[1]);
-  EEPROM_save_B(EEPROM_BABYSTEP_Z, &babystepMem[2]);
 }
 
 static void lcd_babystep_x() {
@@ -2718,11 +2720,19 @@ void lcd_update()
 #endif
 
 #ifdef ULTIPANEL
-	  if (timeoutToStatus < millis() && currentMenu != lcd_status_screen)
-	  {
-		  lcd_return_to_status();
-		  lcdDrawUpdate = 2;
-	  }
+    if (timeoutToStatus < millis() && currentMenu != lcd_status_screen)
+    {
+      // Exiting a menu. Let's call the menu function the last time with menuExiting flag set to true
+      // to give it a chance to save its state.
+      // This is useful for example, when the babystep value has to be written into EEPROM.
+      if (currentMenu != NULL) {
+        menuExiting = true;
+        (*currentMenu)();
+        menuExiting = false;
+      }
+      lcd_return_to_status();
+      lcdDrawUpdate = 2;
+    }
 #endif//ULTIPANEL
 	  if (lcdDrawUpdate == 2) lcd_implementation_clear();
 	  if (lcdDrawUpdate) lcdDrawUpdate--;
